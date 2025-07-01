@@ -27,7 +27,7 @@ CERTS_VOLUME_NAME  := rproxy-certs
 # Certs path inside container (hardcoded in certs/manager.go)
 CERTS_MOUNT_PATH   := /certs
 # Optional: Set to true for Let's Encrypt staging/testing (default: false)
-LEGO_STAGING := true
+LEGO_STAGING := false
 
 # Check required variables from .env are set
 REQUIRED_ENV_VARS := GANDI_API_KEY ACME_EMAIL GANDI_ZONE

@@ -38,8 +38,16 @@ func NewProxyHandler(router *Router) http.Handler {
 
 		req.URL.Scheme = targetURL.Scheme
 		req.URL.Host = targetURL.Host
-		req.Header.Set("X-Forwarded-Host", req.Header.Get("Host"))
+		
+		// Store the original host before we modify it
+		originalHost := req.Header.Get("Host")
+		
+		// Set all the X-Forwarded headers
+		req.Header.Set("X-Forwarded-Host", originalHost)
 		req.Header.Set("X-Forwarded-Proto", "https") // We are terminating TLS
+		req.Header.Set("X-Forwarded-For", req.RemoteAddr)
+		req.Header.Set("X-Real-IP", req.RemoteAddr)
+		
 		req.Host = targetURL.Host // Set Host header to the target's host
 
 		// DEBUG level logging can be achieved by setting the slog level in main.go
