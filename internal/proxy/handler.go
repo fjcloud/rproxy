@@ -39,19 +39,36 @@ func NewProxyHandler(router *Router) http.Handler {
 		req.URL.Scheme = targetURL.Scheme
 		req.URL.Host = targetURL.Host
 		
-		// Store the original host before we modify it
-		originalHost := req.Header.Get("Host")
+		// Get the original host from multiple sources, prioritizing TLS SNI
+		originalHost := ""
+		if req.TLS != nil && req.TLS.ServerName != "" {
+			originalHost = req.TLS.ServerName
+		} else {
+			originalHost = req.Header.Get("Host")
+		}
+		
+		// If still empty, use the FQDN we found
+		if originalHost == "" {
+			originalHost = fqdn
+			slog.Debug("Handler: Using FQDN as fallback for empty Host/TLS SNI", "fqdn", fqdn)
+		}
+		
+		// Extract IP address from RemoteAddr (remove port if present)
+		clientIP := req.RemoteAddr
+		if host, _, err := net.SplitHostPort(req.RemoteAddr); err == nil {
+			clientIP = host
+		}
 		
 		// Set all the X-Forwarded headers
 		req.Header.Set("X-Forwarded-Host", originalHost)
 		req.Header.Set("X-Forwarded-Proto", "https") // We are terminating TLS
-		req.Header.Set("X-Forwarded-For", req.RemoteAddr)
-		req.Header.Set("X-Real-IP", req.RemoteAddr)
+		req.Header.Set("X-Forwarded-For", clientIP)
+		req.Header.Set("X-Real-IP", clientIP)
 		
 		req.Host = targetURL.Host // Set Host header to the target's host
 
 		// DEBUG level logging can be achieved by setting the slog level in main.go
-		// slog.Debug("Handler: Proxying request", "fqdn", fqdn, "target", targetURL.Host, "path", req.URL.Path)
+		slog.Debug("Handler: Proxying request", "fqdn", fqdn, "originalHost", originalHost, "target", targetURL.Host, "path", req.URL.Path)
 		// log.Printf("[DEBUG] Handler: Proxying %s -> %s%s", fqdn, targetURL.Host, req.URL.Path)
 	}
 
