@@ -10,9 +10,10 @@ import (
 	"encoding/pem"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
-	"rproxy/internal/config" // Assuming module path is rproxy
+	"rproxy/internal/config"
 	"sync"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/go-acme/lego/v4/certificate"
 	"github.com/go-acme/lego/v4/challenge/dns01"
 	"github.com/go-acme/lego/v4/lego"
+	"github.com/go-acme/lego/v4/providers/dns/gandiv5"
 	"github.com/go-acme/lego/v4/registration"
 )
 
@@ -138,13 +140,19 @@ func NewManager(cfg *config.Config) (*Manager, error) {
 		return nil, fmt.Errorf("failed to create ACME client: %w", err)
 	}
 
-	// Use Manual Gandi HTTP Provider
-	slog.Info("Setting up Manual Gandi HTTP provider", "zone", cfg.GandiZone)
-	manualProvider := NewManualGandiHTTPProvider(cfg.GandiAPIKey, cfg.GandiZone)
-	resolverOpt := dns01.AddRecursiveNameservers([]string{"1.1.1.1:53", "8.8.8.8:53"})
-	err = client.Challenge.SetDNS01Provider(manualProvider, resolverOpt)
+	// Use Gandi LiveDNS provider with Personal Access Token (Bearer auth)
+	slog.Info("Setting up Gandi DNS provider using Personal Access Token")
+	gandiCfg := gandiv5.NewDefaultConfig()
+	gandiCfg.HTTPClient = &http.Client{Timeout: 30 * time.Second}
+	gandiCfg.PersonalAccessToken = cfg.GandiPAT
+	gandiProvider, err := gandiv5.NewDNSProviderConfig(gandiCfg)
 	if err != nil {
-		return nil, fmt.Errorf("failed to set Manual Gandi DNS01 provider with resolvers: %w", err)
+		return nil, fmt.Errorf("failed to create Gandi DNS provider: %w", err)
+	}
+	resolverOpt := dns01.AddRecursiveNameservers([]string{"1.1.1.1:53", "8.8.8.8:53"})
+	err = client.Challenge.SetDNS01Provider(gandiProvider, resolverOpt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to set Gandi DNS01 provider with resolvers: %w", err)
 	}
 
 	// Register or Resolve ACME User

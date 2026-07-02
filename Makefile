@@ -30,7 +30,7 @@ CERTS_MOUNT_PATH   := /certs
 LEGO_STAGING := false
 
 # Check required variables from .env are set
-REQUIRED_ENV_VARS := GANDI_API_KEY ACME_EMAIL GANDI_ZONE
+REQUIRED_ENV_VARS := GANDI_PAT ACME_EMAIL GANDI_ZONE
 $(foreach var,$(REQUIRED_ENV_VARS),$(if $(value $(var)),,$(error Please set $(var) in .env))) 
 # Check derived key path exists
 ifeq ($(wildcard $(PODMAN_MACHINE_KEY)),)
@@ -71,7 +71,7 @@ run: ## Run the container attached (temporary), uses named cert volume
 		-e PODMAN_SSH_USER \
 		-e PODMAN_SSH_HOST=$(PODMAN_SSH_HOST) \
 		-e PODMAN_SSH_PORT=$(PODMAN_SSH_PORT) \
-		-e GANDI_API_KEY \
+		-e GANDI_PAT \
 		-e ACME_EMAIL \
 		-e GANDI_ZONE \
 		-e LEGO_STAGING \
@@ -90,7 +90,7 @@ deploy: ## Deploy container detached, uses named cert volume
 		-e PODMAN_SSH_USER \
 		-e PODMAN_SSH_HOST=$(PODMAN_SSH_HOST) \
 		-e PODMAN_SSH_PORT=$(PODMAN_SSH_PORT) \
-		-e GANDI_API_KEY \
+		-e GANDI_PAT \
 		-e ACME_EMAIL \
 		-e GANDI_ZONE \
 		-e LEGO_STAGING \

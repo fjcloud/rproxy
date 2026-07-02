@@ -30,9 +30,9 @@ func NewServer(router *Router, certMgr *certs.Manager) *Server {
 		Addr:         ":443", // Revert to default dual-stack address
 		Handler:      proxyHandler,
 		TLSConfig:    tlsConfig,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		ReadTimeout:  60 * time.Second,  // 1 minute - time to read the client request
+		WriteTimeout: 600 * time.Second, // 10 minutes - time for backend to respond and write back
+		IdleTimeout:  120 * time.Second, // 2 minutes - keep idle connections alive
 	}
 
 	return &Server{

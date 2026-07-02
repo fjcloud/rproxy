@@ -21,7 +21,7 @@ type Config struct {
 	SSHPort string // Set via Makefile
 	// SSHIdentityFile string // Removed field
 
-	GandiAPIKey string
+	GandiPAT string // Gandi Personal Access Token (uses "Bearer" auth prefix)
 	ACMEEmail   string
 	GandiZone   string
 	ACMEStaging bool
@@ -44,7 +44,7 @@ func LoadConfig() (*Config, error) {
 	cfg.SSHHost = getEnv("PODMAN_SSH_HOST", "") // Expect host set by Makefile
 	cfg.SSHPort = getEnv("PODMAN_SSH_PORT", "") // Expect port set by Makefile
 	// cfg.SSHIdentityFile = getEnv("PODMAN_SSH_KEY", "") // Removed line
-	cfg.GandiAPIKey = getEnv("GANDI_API_KEY", "")
+	cfg.GandiPAT = getEnv("GANDI_PAT", "")
 	cfg.ACMEEmail = getEnv("ACME_EMAIL", "")
 	cfg.GandiZone = getEnv("GANDI_ZONE", "")
 	cfg.ACMEStaging = getEnvAsBool("LEGO_STAGING", cfg.ACMEStaging)
@@ -68,8 +68,8 @@ func LoadConfig() (*Config, error) {
      }
 	*/
 
-	if cfg.GandiAPIKey == "" {
-		return nil, fmt.Errorf("GANDI_API_KEY environment variable must be set (in .env)")
+	if cfg.GandiPAT == "" {
+		return nil, fmt.Errorf("GANDI_PAT (Personal Access Token) must be set in .env")
 	}
 	if cfg.ACMEEmail == "" {
 		return nil, fmt.Errorf("ACME_EMAIL environment variable must be set (in .env)")

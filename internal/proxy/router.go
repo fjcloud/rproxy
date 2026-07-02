@@ -73,6 +73,7 @@ func (r *Router) updateRoutes(ctx context.Context) {
 
 	newRoutes := make(map[string]Route)
 	routesChanged := false
+	var fqdnsNeedingCerts []string // Collect FQDNs that need certificate management
 
 	// 1. List containers
 	containers, err := r.podmanClient.ListContainers()
@@ -83,7 +84,7 @@ func (r *Router) updateRoutes(ctx context.Context) {
 
 	// 2. Inspect each container found to get IP
 	var wg sync.WaitGroup
-	var inspectMutex sync.Mutex // Mutex to protect access to newRoutes map from goroutines
+	var inspectMutex sync.Mutex // Mutex to protect access to newRoutes map and fqdnsNeedingCerts slice from goroutines
 
 	for _, container := range containers {
 		wg.Add(1)
@@ -128,14 +129,13 @@ func (r *Router) updateRoutes(ctx context.Context) {
 				routesChanged = true
 				slog.Info("Router: Updating route", "fqdn", c.FQDN, "targetIP", ipAddress, "targetPort", exposedPort, "container", c.Name)
 				newRoutes[c.FQDN] = newRoute
-				inspectMutex.Unlock() // Unlock before cert check
-				// Trigger certificate check immediately for new/changed FQDN
-				r.certManager.CheckAndManageCert(c.FQDN)
+				// Collect FQDN for certificate management (will be processed sequentially later)
+				fqdnsNeedingCerts = append(fqdnsNeedingCerts, c.FQDN)
 			} else {
 				// Route exists and is unchanged, just copy it
 				newRoutes[c.FQDN] = newRoute
-				inspectMutex.Unlock()
 			}
+			inspectMutex.Unlock()
 
 		}(container)
 	}
@@ -147,5 +147,16 @@ func (r *Router) updateRoutes(ctx context.Context) {
 		r.routes = newRoutes
 		slog.Info("Router: Route map updated", "active_routes", len(r.routes))
 		r.mu.Unlock()
+	}
+
+	// 3. Process certificate management sequentially (one by one)
+	if len(fqdnsNeedingCerts) > 0 {
+		slog.Info("Router: Processing certificate management for FQDNs", "count", len(fqdnsNeedingCerts), "fqdns", fqdnsNeedingCerts)
+		for _, fqdn := range fqdnsNeedingCerts {
+			slog.Info("Router: Checking certificate for FQDN", "fqdn", fqdn)
+			r.certManager.CheckAndManageCert(fqdn)
+			// Optional: Add a small delay between certificate operations to avoid overwhelming the DNS provider
+			time.Sleep(2 * time.Second)
+		}
 	}
 } 
