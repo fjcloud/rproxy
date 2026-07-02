@@ -149,14 +149,22 @@ func (r *Router) updateRoutes(ctx context.Context) {
 		r.mu.Unlock()
 	}
 
-	// 3. Process certificate management sequentially (one by one)
+	// 3. Process certificate management sequentially (one by one).
+	// All domains share the same _acme-challenge CNAME target (m4min.local.msl.cloud),
+	// so their DNS-01 TXT records compete. After each challenge completes (success or fail),
+	// the cleanup removes the token from the shared record but public DNS resolvers cache
+	// the old value for the record's TTL (300s). We wait 310s between challenges so the
+	// cached value expires before the next challenge's token needs to be visible.
+	const dnsChallengeTTLWait = 310 * time.Second
 	if len(fqdnsNeedingCerts) > 0 {
 		slog.Info("Router: Processing certificate management for FQDNs", "count", len(fqdnsNeedingCerts), "fqdns", fqdnsNeedingCerts)
-		for _, fqdn := range fqdnsNeedingCerts {
+		for i, fqdn := range fqdnsNeedingCerts {
 			slog.Info("Router: Checking certificate for FQDN", "fqdn", fqdn)
 			r.certManager.CheckAndManageCert(fqdn)
-			// Optional: Add a small delay between certificate operations to avoid overwhelming the DNS provider
-			time.Sleep(2 * time.Second)
+			if i < len(fqdnsNeedingCerts)-1 {
+				slog.Info("Router: Waiting for DNS TTL to expire before next certificate renewal", "wait", dnsChallengeTTLWait)
+				time.Sleep(dnsChallengeTTLWait)
+			}
 		}
 	}
 } 
