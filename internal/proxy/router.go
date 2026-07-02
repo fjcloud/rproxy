@@ -19,20 +19,22 @@ type Route struct {
 
 // Router manages the dynamic routing table.
 type Router struct {
-	mu         sync.RWMutex
-	routes     map[string]Route // fqdn -> Route
+	mu           sync.RWMutex
+	routes       map[string]Route // fqdn -> Route
 	podmanClient *podman.Client
-	certManager *certs.Manager
-	config     *config.Config
+	certManager  *certs.Manager
+	config       *config.Config
+	certWorkCh   chan []string // FQDNs needing cert work, buffered to avoid blocking route updates
 }
 
 // NewRouter creates a new Router.
 func NewRouter(cfg *config.Config, pClient *podman.Client, cMgr *certs.Manager) *Router {
 	return &Router{
-		routes:     make(map[string]Route),
+		routes:       make(map[string]Route),
 		podmanClient: pClient,
-		certManager: cMgr,
-		config:     cfg,
+		certManager:  cMgr,
+		config:       cfg,
+		certWorkCh:   make(chan []string, 1),
 	}
 }
 
@@ -56,6 +58,38 @@ func (r *Router) RunUpdateLoop(ctx context.Context) {
 			r.updateRoutes(ctx)
 		case <-ctx.Done():
 			slog.Info("Stopping route update loop.")
+			return
+		}
+	}
+}
+
+// RunCertManager processes certificate renewals independently of route updates.
+// It reads batches of FQDNs from the cert work channel and renews them sequentially,
+// waiting dnsChallengeTTLWait between each to let DNS caches expire (all domains share
+// the same _acme-challenge CNAME target so their TXT records would otherwise collide).
+func (r *Router) RunCertManager(ctx context.Context) {
+	const dnsChallengeTTLWait = 310 * time.Second
+	slog.Info("Starting cert manager")
+	for {
+		select {
+		case fqdns := <-r.certWorkCh:
+			slog.Info("CertManager: Processing certificate renewals", "count", len(fqdns), "fqdns", fqdns)
+			for i, fqdn := range fqdns {
+				slog.Info("CertManager: Checking certificate", "fqdn", fqdn)
+				r.certManager.CheckAndManageCert(fqdn)
+				if i < len(fqdns)-1 {
+					slog.Info("CertManager: Waiting for DNS TTL to expire before next renewal", "wait", dnsChallengeTTLWait)
+					select {
+					case <-time.After(dnsChallengeTTLWait):
+					case <-ctx.Done():
+						slog.Info("CertManager: Stopping during TTL wait.")
+						return
+					}
+				}
+			}
+			slog.Info("CertManager: Batch complete")
+		case <-ctx.Done():
+			slog.Info("Stopping cert manager.")
 			return
 		}
 	}
@@ -149,22 +183,14 @@ func (r *Router) updateRoutes(ctx context.Context) {
 		r.mu.Unlock()
 	}
 
-	// 3. Process certificate management sequentially (one by one).
-	// All domains share the same _acme-challenge CNAME target (m4min.local.msl.cloud),
-	// so their DNS-01 TXT records compete. After each challenge completes (success or fail),
-	// the cleanup removes the token from the shared record but public DNS resolvers cache
-	// the old value for the record's TTL (300s). We wait 310s between challenges so the
-	// cached value expires before the next challenge's token needs to be visible.
-	const dnsChallengeTTLWait = 310 * time.Second
+	// 3. Hand off certificate management to the dedicated cert manager goroutine.
+	// This avoids blocking the route update loop during long cert renewals.
 	if len(fqdnsNeedingCerts) > 0 {
-		slog.Info("Router: Processing certificate management for FQDNs", "count", len(fqdnsNeedingCerts), "fqdns", fqdnsNeedingCerts)
-		for i, fqdn := range fqdnsNeedingCerts {
-			slog.Info("Router: Checking certificate for FQDN", "fqdn", fqdn)
-			r.certManager.CheckAndManageCert(fqdn)
-			if i < len(fqdnsNeedingCerts)-1 {
-				slog.Info("Router: Waiting for DNS TTL to expire before next certificate renewal", "wait", dnsChallengeTTLWait)
-				time.Sleep(dnsChallengeTTLWait)
-			}
+		select {
+		case r.certWorkCh <- fqdnsNeedingCerts:
+			slog.Info("Router: Queued certificate management", "count", len(fqdnsNeedingCerts), "fqdns", fqdnsNeedingCerts)
+		default:
+			slog.Warn("Router: Cert manager busy, cert renewal will retry on next route change", "fqdns", fqdnsNeedingCerts)
 		}
 	}
 } 

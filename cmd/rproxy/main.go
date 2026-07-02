@@ -91,6 +91,12 @@ func main() {
 		return nil
 	})
 
+	// Start Certificate Manager (runs independently of route updates)
+	eg.Go(func() error {
+		router.RunCertManager(ctx)
+		return nil
+	})
+
 	// Start Proxy Server
 	eg.Go(func() error {
 		if err := proxyServer.Start(ctx); err != nil {
